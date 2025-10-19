@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync/atomic"
+	"encoding/json"
 )
 
 type apiConfig struct {
@@ -46,6 +47,52 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
+	chirp := struct {
+		Body string `json:"body"`
+	} {}
+
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&chirp)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	if len(chirp.Body) <= 140 {
+		valid := struct {
+			Valid bool `json:"valid"`
+		} {Valid: true}
+
+		resp, err := json.Marshal(valid)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			w.WriteHeader(500)
+			return
+		}
+		
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(resp)
+	} else {
+		errorMsg := struct {
+			Error string `json:"error"`
+		} {Error: "Chirp is too long"}
+
+		resp, err := json.Marshal(errorMsg)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			w.WriteHeader(500)
+			return
+		}
+		
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write(resp)
+	}
+}
+
 
 func main() {
 	mux := http.NewServeMux()
@@ -60,6 +107,7 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", healthzHandler)
 	mux.HandleFunc("GET /admin/metrics", apiConfig.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiConfig.resetHandler)
+	mux.HandleFunc("POST /api/validate_chirp", validateChirpHandler)
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
