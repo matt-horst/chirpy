@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 	"sync/atomic"
-	"encoding/json"
 )
 
 type apiConfig struct {
@@ -61,11 +63,26 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(chirp.Body) <= 140 {
-		valid := struct {
-			Valid bool `json:"valid"`
-		} {Valid: true}
+		profanity := []string{"kerfuffle", "sharbert", "fornax"}
+		words := strings.Split(chirp.Body, " ")
+		for i, word := range words {
+			if slices.Contains(profanity[:], strings.ToLower(word)) {
+				words[i] = "****"
+			}
+		}
 
-		resp, err := json.Marshal(valid)
+		cleaned := struct {
+			CleanedBody string `json:"cleaned_body"`
+		} {CleanedBody: strings.Join(words, " ")}
+
+		responsdWithJson(w, 200, cleaned)
+	} else {
+		respondWithError(w, 400, "Chirp is too long")
+	}
+}
+
+func responsdWithJson(w http.ResponseWriter, code int, payload interface{}) {
+		resp, err := json.Marshal(payload)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			w.WriteHeader(500)
@@ -73,12 +90,14 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		
 		w.Header().Add("Content-Type", "application/json")
-		w.WriteHeader(200)
+		w.WriteHeader(code)
 		w.Write(resp)
-	} else {
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) {
 		errorMsg := struct {
 			Error string `json:"error"`
-		} {Error: "Chirp is too long"}
+		} {Error: msg}
 
 		resp, err := json.Marshal(errorMsg)
 		if err != nil {
@@ -88,9 +107,8 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		
 		w.Header().Add("Content-Type", "application/json")
-		w.WriteHeader(400)
+		w.WriteHeader(code)
 		w.Write(resp)
-	}
 }
 
 
