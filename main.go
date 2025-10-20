@@ -15,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/matt-horst/chirpy/internal/database"
+	"github.com/matt-horst/chirpy/internal/auth"
 )
 
 type apiConfig struct {
@@ -94,20 +95,29 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 		w.Write(resp)
 }
 
-func (cfg *apiConfig) usersHandler(w http.ResponseWriter, r *http.Request) {
-	email := struct {
-		Email string `json:"email"`
+func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
+	data := struct {
+		Password string `json:"password"`
+		Email string 	`json:"email"`
 	} {}
 
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&email)
+	err := decoder.Decode(&data)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		w.WriteHeader(500)
 		return
 	}
 
-	dbUser, err := cfg.dbQueries.CreateUser(r.Context(), email.Email)
+	hashed_password, err := auth.HashPassword(data.Password)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	params := database.CreateUserParams {Email: data.Email, HashedPassword: hashed_password}
+	dbUser, err := cfg.dbQueries.CreateUser(r.Context(), params)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		w.WriteHeader(500)
@@ -122,6 +132,43 @@ func (cfg *apiConfig) usersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	responsdWithJson(w, 201, user)
+}
+
+func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
+	data := struct {
+		Password string `json:"password"`
+		Email string 	`json:"email"`
+	} {}
+
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&data)
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	user, err := cfg.dbQueries.GetUser(r.Context(), data.Email)
+	if err != nil {
+		respondWithError(w, 401, "Incorrect email and password")
+	}
+
+	ok, err := auth.CheckPasswordHash(data.Password, user.HashedPassword)
+	if err != nil {
+		respondWithError(w, 401, "Incorrect email and password")
+	}
+
+	if ok {
+		resp := User {
+			ID: user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email: user.Email,
+		}
+		responsdWithJson(w, 200, resp)
+	} else {
+		respondWithError(w, 401, "Incorrect email and password")
+	}
 }
 
 func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +306,8 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", healthzHandler)
 	mux.HandleFunc("GET /admin/metrics", apiConfig.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiConfig.resetHandler)
-	mux.HandleFunc("POST /api/users", apiConfig.usersHandler)
+	mux.HandleFunc("POST /api/users", apiConfig.createUserHandler)
+	mux.HandleFunc("POST /api/login", apiConfig.loginUserHandler)
 	mux.HandleFunc("POST /api/chirps", apiConfig.createChirpHandler)
 	mux.HandleFunc("GET /api/chirps", apiConfig.getAllChirpsHandler)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiConfig.getSingleChirpHandler)
