@@ -9,7 +9,9 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/matt-horst/chirpy/internal/database"
@@ -118,6 +120,43 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 		w.Write(resp)
 }
 
+func (cfg *apiConfig) usersHandler(w http.ResponseWriter, r *http.Request) {
+	email := struct {
+		Email string `json:"email"`
+	} {}
+
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&email)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	dbUser, err := cfg.dbQueries.CreateUser(r.Context(), email.Email)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	user := User {
+		ID: dbUser.ID, 
+		CreatedAt: dbUser.CreatedAt, 
+		UpdatedAt: dbUser.UpdatedAt, 
+		Email: dbUser.Email, 
+	}
+
+	responsdWithJson(w, 201, user)
+}
+
+type User struct {
+	ID uuid.UUID 		`json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email string 		`json:"email"`
+};
+
 
 func main() {
 	godotenv.Load(".env")
@@ -143,6 +182,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiConfig.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiConfig.resetHandler)
 	mux.HandleFunc("POST /api/validate_chirp", validateChirpHandler)
+	mux.HandleFunc("POST /api/users", apiConfig.usersHandler)
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
