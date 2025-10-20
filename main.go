@@ -172,8 +172,8 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 	responsdWithJson(w, 201, resp)
 }
 
-func (cfg *apiConfig) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.dbQueries.GetChirps(r.Context())
+func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.dbQueries.GetAllChirps(r.Context())
 	if err != nil {
 		w.WriteHeader(500)
 		fmt.Printf("Error: %v\n", err)
@@ -189,6 +189,31 @@ func (cfg *apiConfig) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
 			Body: chirp.Body,
 			UserID: chirp.UserID.UUID,
 		})
+	}
+
+	responsdWithJson(w, 200, resp)
+}
+
+func (cfg *apiConfig) getSingleChirpHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	chirp, err := cfg.dbQueries.GetSingleChirp(r.Context(), id)
+	if err != nil {
+		w.WriteHeader(404)
+		return
+	}
+
+	resp := Chirp {
+		ID: chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body: chirp.Body,
+		UserID: chirp.UserID.UUID,
 	}
 
 	responsdWithJson(w, 200, resp)
@@ -236,7 +261,8 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", apiConfig.resetHandler)
 	mux.HandleFunc("POST /api/users", apiConfig.usersHandler)
 	mux.HandleFunc("POST /api/chirps", apiConfig.createChirpHandler)
-	mux.HandleFunc("GET /api/chirps", apiConfig.getChirpsHandler)
+	mux.HandleFunc("GET /api/chirps", apiConfig.getAllChirpsHandler)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiConfig.getSingleChirpHandler)
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
