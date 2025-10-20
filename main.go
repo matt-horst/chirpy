@@ -64,22 +64,7 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
-	chirp := struct {
-		Body string `json:"body"`
-	} {}
-
-	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&chirp)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		w.WriteHeader(500)
-		return
-	}
-
-}
-
-func responsdWithJson(w http.ResponseWriter, code int, payload interface{}) {
+func responsdWithJson(w http.ResponseWriter, code int, payload any) {
 		resp, err := json.Marshal(payload)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -139,7 +124,7 @@ func (cfg *apiConfig) usersHandler(w http.ResponseWriter, r *http.Request) {
 	responsdWithJson(w, 201, user)
 }
 
-func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request) {
 	chirp := struct {
 		Body string 		`json:"body"`
 		UserID uuid.UUID 	`json:"user_id"`
@@ -187,6 +172,28 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 	responsdWithJson(w, 201, resp)
 }
 
+func (cfg *apiConfig) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.dbQueries.GetChirps(r.Context())
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	var resp []Chirp
+	for _, chirp := range chirps {
+		resp = append(resp, Chirp{
+			ID: chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body: chirp.Body,
+			UserID: chirp.UserID.UUID,
+		})
+	}
+
+	responsdWithJson(w, 200, resp)
+}
+
 type User struct {
 	ID uuid.UUID 		`json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -228,7 +235,8 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiConfig.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiConfig.resetHandler)
 	mux.HandleFunc("POST /api/users", apiConfig.usersHandler)
-	mux.HandleFunc("POST /api/chirps", apiConfig.chirpsHandler)
+	mux.HandleFunc("POST /api/chirps", apiConfig.createChirpHandler)
+	mux.HandleFunc("GET /api/chirps", apiConfig.getChirpsHandler)
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
