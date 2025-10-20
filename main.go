@@ -77,23 +77,6 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(chirp.Body) <= 140 {
-		profanity := []string{"kerfuffle", "sharbert", "fornax"}
-		words := strings.Split(chirp.Body, " ")
-		for i, word := range words {
-			if slices.Contains(profanity[:], strings.ToLower(word)) {
-				words[i] = "****"
-			}
-		}
-
-		cleaned := struct {
-			CleanedBody string `json:"cleaned_body"`
-		} {CleanedBody: strings.Join(words, " ")}
-
-		responsdWithJson(w, 200, cleaned)
-	} else {
-		respondWithError(w, 400, "Chirp is too long")
-	}
 }
 
 func responsdWithJson(w http.ResponseWriter, code int, payload interface{}) {
@@ -156,12 +139,68 @@ func (cfg *apiConfig) usersHandler(w http.ResponseWriter, r *http.Request) {
 	responsdWithJson(w, 201, user)
 }
 
+func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
+	chirp := struct {
+		Body string 		`json:"body"`
+		UserID uuid.UUID 	`json:"user_id"`
+	} {}
+
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&chirp)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	if len(chirp.Body) > 140 {
+		respondWithError(w, 400, "Chirp is too long")
+	}
+
+	profanity := []string{"kerfuffle", "sharbert", "fornax"}
+	words := strings.Split(chirp.Body, " ")
+	for i, word := range words {
+		if slices.Contains(profanity[:], strings.ToLower(word)) {
+			words[i] = "****"
+		}
+	}
+
+	params := database.CreateChirpParams {
+		Body: strings.Join(words, " "),
+		UserID: uuid.NullUUID { Valid: true, UUID: chirp.UserID },
+	}
+	dbChirp, err := cfg.dbQueries.CreateChirp(r.Context(), params)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	resp := Chirp {
+		ID: dbChirp.ID,
+		CreatedAt: dbChirp.CreatedAt,
+		UpdatedAt: dbChirp.UpdatedAt,
+		Body: dbChirp.Body,
+		UserID: dbChirp.UserID.UUID,
+	}
+
+	responsdWithJson(w, 201, resp)
+}
+
 type User struct {
 	ID uuid.UUID 		`json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email string 		`json:"email"`
 };
+
+type Chirp struct {
+	ID uuid.UUID		`json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body string			`json:"body"`
+	UserID uuid.UUID 	`json:"user_id"`
+}
 
 
 func main() {
@@ -188,8 +227,8 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", healthzHandler)
 	mux.HandleFunc("GET /admin/metrics", apiConfig.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiConfig.resetHandler)
-	mux.HandleFunc("POST /api/validate_chirp", validateChirpHandler)
 	mux.HandleFunc("POST /api/users", apiConfig.usersHandler)
+	mux.HandleFunc("POST /api/chirps", apiConfig.chirpsHandler)
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
