@@ -20,6 +20,7 @@ import (
 type apiConfig struct {
 	fileServerHits atomic.Int32
 	dbQueries *database.Queries
+	platform string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -44,9 +45,14 @@ func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func (cfg *apiConfig) resetHandler(w http.ResponseWriter, _ *http.Request) {
-	cfg.fileServerHits.Store(0)
-	w.WriteHeader(200)
+func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		w.WriteHeader(403)
+	} else {
+		cfg.fileServerHits.Store(0)
+		cfg.dbQueries.DeleteUsers(r.Context())
+		w.WriteHeader(200)
+	}
 }
 
 func healthzHandler(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +167,7 @@ type User struct {
 func main() {
 	godotenv.Load(".env")
 	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -171,7 +178,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	apiConfig := apiConfig{dbQueries: dbQueries}
+	apiConfig := apiConfig{dbQueries: dbQueries, platform: platform}
 
 	var fileSystem http.Dir = "."
 	fileServer := http.FileServer(fileSystem)
