@@ -1,16 +1,23 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"github.com/matt-horst/chirpy/internal/database"
 )
 
 type apiConfig struct {
 	fileServerHits atomic.Int32
+	dbQueries *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -113,9 +120,19 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 
 
 func main() {
+	godotenv.Load(".env")
+	dbURL := os.Getenv("DB_URL")
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+	dbQueries := database.New(db)
+
 	mux := http.NewServeMux()
 
-	apiConfig := apiConfig{}
+	apiConfig := apiConfig{dbQueries: dbQueries}
 
 	var fileSystem http.Dir = "."
 	fileServer := http.FileServer(fileSystem)
@@ -129,7 +146,7 @@ func main() {
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if err != nil {
 		fmt.Printf("Error: %v", err)
 	}

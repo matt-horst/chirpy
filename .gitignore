@@ -8,6 +8,7 @@
 *.so
 *.dylib
 out
+chirpy
 
 # Test binary, built with `go test -c`
 *.test
