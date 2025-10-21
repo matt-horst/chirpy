@@ -139,7 +139,6 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Password string `json:"password"`
 		Email string 	`json:"email"`
-		ExpiresInSeconds int `json:"expires_in_seconds"`
 	} {}
 
 	decoder := json.NewDecoder(r.Body)
@@ -163,11 +162,22 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 
 
 	if ok {
-		if data.ExpiresInSeconds <= 0 || data.ExpiresInSeconds > 3600 {
-			data.ExpiresInSeconds = 3600
+		token, err := auth.MakeJWT(user.ID, cfg.secret, time.Hour)
+		if err != nil {
+			w.WriteHeader(500)
+			fmt.Printf("Error: %v", err)
+			return
 		}
 
-		token, err := auth.MakeJWT(user.ID, cfg.secret, time.Duration(data.ExpiresInSeconds) * time.Second)
+		refreshToken, err := auth.MakeRefreshToken()
+		if err != nil {
+			w.WriteHeader(500)
+			fmt.Printf("Error: %v", err)
+			return
+		}
+		
+		params := database.CreateRefreshTokenParams {Token: refreshToken, UserID: uuid.NullUUID{UUID: user.ID, Valid: true}}
+		_, err = cfg.dbQueries.CreateRefreshToken(r.Context(), params)
 		if err != nil {
 			w.WriteHeader(500)
 			fmt.Printf("Error: %v", err)
@@ -180,6 +190,7 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt: user.UpdatedAt,
 			Email: user.Email,
 			Token: token,
+			RefreshToken: refreshToken,
 		}
 		responsdWithJson(w, 200, resp)
 	} else {
@@ -295,12 +306,67 @@ func (cfg *apiConfig) getSingleChirpHandler(w http.ResponseWriter, r *http.Reque
 	responsdWithJson(w, 200, resp)
 }
 
+func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, err.Error())
+		return
+	}
+
+	refreshToken, err := cfg.dbQueries.GetRefreshToken(r.Context(), tokenString)
+	if err != nil {
+		respondWithError(w, 401, "no refresh token found")
+		return
+	}
+
+	fmt.Printf("now: %v, expires: %v\n", time.Now(), refreshToken.ExpiresAt)
+	if time.Now().After(refreshToken.ExpiresAt) {
+		respondWithError(w, 401, "refresh token expired")
+		return
+	}
+
+	if refreshToken.RevokedAt.Valid && time.Now().After(refreshToken.RevokedAt.Time) {
+		respondWithError(w, 401, "refresh token revoked")
+		return
+	}
+
+	accessToken, err := auth.MakeJWT(refreshToken.UserID.UUID, cfg.secret, time.Hour)
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Printf("Error: %v\n", err)
+		return 
+	}
+
+	resp := struct {
+		Token string `json:"token"`
+	} {Token: accessToken}
+
+	responsdWithJson(w, 200, resp)
+}
+
+func (cfg *apiConfig) revokeHandler(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, tokenString)
+		return
+	}
+
+	_, err = cfg.dbQueries.RevokeRefreshToken(r.Context(), tokenString)
+	if err != nil {
+		respondWithError(w, 401, "refresh token does not exist")
+		return
+	}
+
+	w.WriteHeader(204)
+}
+
 type User struct {
 	ID uuid.UUID 		`json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email string 		`json:"email"`
 	Token string 		`json:"token"`
+	RefreshToken string `json:"refresh_token"`
 };
 
 type Chirp struct {
@@ -342,6 +408,8 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiConfig.createChirpHandler)
 	mux.HandleFunc("GET /api/chirps", apiConfig.getAllChirpsHandler)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiConfig.getSingleChirpHandler)
+	mux.HandleFunc("POST /api/refresh", apiConfig.refreshHandler)
+	mux.HandleFunc("POST /api/revoke", apiConfig.revokeHandler)
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
