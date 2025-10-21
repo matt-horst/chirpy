@@ -413,6 +413,45 @@ func (cfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) 
 	respondWithJson(w, http.StatusOK, resp)
 }
 
+func (cfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "no access token")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(accessToken, cfg.secret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "invalid access token")
+		return
+	}
+
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid chirp id")
+		return
+	}
+
+	chirp, err := cfg.dbQueries.GetSingleChirp(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "no chirp found")
+		return
+	}
+
+	if chirp.UserID.UUID != userID {
+		respondWithError(w, http.StatusForbidden, "invalid author")
+		return
+	}
+
+	_, err = cfg.dbQueries.DeleteChirp(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "failed to delete chirp")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type User struct {
 	ID uuid.UUID 		`json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -464,6 +503,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", apiConfig.refreshHandler)
 	mux.HandleFunc("POST /api/revoke", apiConfig.revokeHandler)
 	mux.HandleFunc("PUT /api/users", apiConfig.updateUserHandler)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiConfig.deleteChirpHandler)
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
