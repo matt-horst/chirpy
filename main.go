@@ -66,7 +66,7 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func responsdWithJson(w http.ResponseWriter, code int, payload any) {
+func respondWithJson(w http.ResponseWriter, code int, payload any) {
 		resp, err := json.Marshal(payload)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -132,7 +132,7 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		Email: dbUser.Email, 
 	}
 
-	responsdWithJson(w, 201, user)
+	respondWithJson(w, 201, user)
 }
 
 func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +192,7 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 			Token: token,
 			RefreshToken: refreshToken,
 		}
-		responsdWithJson(w, 200, resp)
+		respondWithJson(w, 200, resp)
 	} else {
 		respondWithError(w, 401, "Incorrect email and password")
 	}
@@ -256,7 +256,7 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 		UserID: dbChirp.UserID.UUID,
 	}
 
-	responsdWithJson(w, 201, resp)
+	respondWithJson(w, 201, resp)
 }
 
 func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +278,7 @@ func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	responsdWithJson(w, 200, resp)
+	respondWithJson(w, 200, resp)
 }
 
 func (cfg *apiConfig) getSingleChirpHandler(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +303,7 @@ func (cfg *apiConfig) getSingleChirpHandler(w http.ResponseWriter, r *http.Reque
 		UserID: chirp.UserID.UUID,
 	}
 
-	responsdWithJson(w, 200, resp)
+	respondWithJson(w, 200, resp)
 }
 
 func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +341,7 @@ func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	} {Token: accessToken}
 
-	responsdWithJson(w, 200, resp)
+	respondWithJson(w, 200, resp)
 }
 
 func (cfg *apiConfig) revokeHandler(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +358,59 @@ func (cfg *apiConfig) revokeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(204)
+}
+
+func (cfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) {
+	accessToken, err := auth.GetBearerToken(r.Header)
+	if err !=  nil {
+		respondWithError(w, http.StatusUnauthorized, "missing access token")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(accessToken, cfg.secret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "invalid access token")
+		return
+	}
+
+	data := struct {
+		Email string `json:"email"`
+		Password string `json:"password"`
+	} {}
+
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&data)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid request data")
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(data.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "failed to update user")
+		return
+	}
+
+	params := database.UpdateUserParams { ID: userID, Email: data.Email, HashedPassword: hashedPassword }
+	user, err := cfg.dbQueries.UpdateUser(r.Context(), params)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "failed to update user")
+		return
+	}
+
+	resp := struct {
+		ID uuid.UUID 			`json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email string 		`json:"email"`
+	} {
+		ID: user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email: user.Email,
+	}
+
+	respondWithJson(w, http.StatusOK, resp)
 }
 
 type User struct {
@@ -410,6 +463,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiConfig.getSingleChirpHandler)
 	mux.HandleFunc("POST /api/refresh", apiConfig.refreshHandler)
 	mux.HandleFunc("POST /api/revoke", apiConfig.revokeHandler)
+	mux.HandleFunc("PUT /api/users", apiConfig.updateUserHandler)
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
