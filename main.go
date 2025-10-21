@@ -23,6 +23,7 @@ type apiConfig struct {
 	dbQueries *database.Queries
 	platform string
 	secret string
+	polkaKey string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -457,6 +458,11 @@ func (cfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (cfg *apiConfig) polkaWebhooksHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil || apiKey != cfg.polkaKey {
+		respondWithError(w, http.StatusUnauthorized, "invalid api key")
+	}
+
 	data := struct {
 		Event string 		`json:"event"`
 		Data struct {
@@ -465,7 +471,7 @@ func (cfg *apiConfig) polkaWebhooksHandler(w http.ResponseWriter, r *http.Reques
 	} {}
 
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&data)
+	err = decoder.Decode(&data)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "invalid payload")
 		return
@@ -507,8 +513,6 @@ type Chirp struct {
 func main() {
 	godotenv.Load(".env")
 	dbURL := os.Getenv("DB_URL")
-	platform := os.Getenv("PLATFORM")
-	secret := os.Getenv("SECRET")
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -519,7 +523,12 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	apiConfig := apiConfig{dbQueries: dbQueries, platform: platform, secret: secret}
+	apiConfig := apiConfig {
+		dbQueries: dbQueries,
+		platform: os.Getenv("PLATFORM"),
+		secret: os.Getenv("SECRET"),
+		polkaKey: os.Getenv("POLKA_KEY"),
+	}
 
 	var fileSystem http.Dir = "."
 	fileServer := http.FileServer(fileSystem)
