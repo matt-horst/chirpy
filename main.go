@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -14,8 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
-	"github.com/matt-horst/chirpy/internal/database"
 	"github.com/matt-horst/chirpy/internal/auth"
+	"github.com/matt-horst/chirpy/internal/database"
 )
 
 type apiConfig struct {
@@ -264,6 +265,7 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 
 func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	authorID := r.URL.Query().Get("author_id")
+	sortBy := r.URL.Query().Get("sort")
 
 	var chirps []database.Chirp
 	var err error
@@ -285,6 +287,7 @@ func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+
 	var resp []Chirp
 	for _, chirp := range chirps {
 		resp = append(resp, Chirp{
@@ -293,6 +296,12 @@ func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request
 			UpdatedAt: chirp.UpdatedAt,
 			Body: chirp.Body,
 			UserID: chirp.UserID.UUID,
+		})
+	}
+
+	if sortBy == "desc" {
+		sort.Slice(resp[:], func(i, j int) bool {
+			return resp[i].CreatedAt.After(resp[j].CreatedAt)
 		})
 	}
 
@@ -476,7 +485,6 @@ func (cfg *apiConfig) polkaWebhooksHandler(w http.ResponseWriter, r *http.Reques
 	apiKey, err := auth.GetAPIKey(r.Header)
 	if err != nil || apiKey != cfg.polkaKey {
 		respondWithError(w, http.StatusUnauthorized, "invalid api key")
-		return
 	}
 
 	data := struct {
