@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"net/http"
 	"testing"
 	"time"
+	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -117,6 +119,57 @@ func TestValidateJWT(t *testing.T) {
 
 			if (userID != c.expectedUserID) {
 				t.Errorf("ValidateJWT() recieved userID = %v, expects userID = %v", userID, c.expectedUserID)
+			}
+		})
+	}
+}
+
+func TestGetBearerToken(t *testing.T) {
+	tokenString := "token"
+
+	validHeader := make(http.Header)
+	validHeader.Add("Authorization", fmt.Sprintf("Bearer    %v", tokenString))
+
+	missingAuthHeader := make(http.Header)
+
+	missingBearerHeader := make(http.Header)
+	missingBearerHeader.Add("Authorization", tokenString)
+
+	cases := [] struct {
+		name string
+		header http.Header
+		expectedToken string
+		expectError bool
+	} {
+		{
+			name: "Valid header",
+			header: validHeader,
+			expectedToken: "token",
+			expectError: false,
+		},
+		{
+			name: "Missing authentication key",
+			header: missingAuthHeader,
+			expectedToken: "",
+			expectError: true,
+		},
+		{
+			name: "Missing bearer token",
+			header: missingBearerHeader,
+			expectedToken: "",
+			expectError: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bearerToken, err := GetBearerToken(c.header)
+			if (err != nil) != c.expectError {
+				t.Errorf("GetBearerToken() received error: %v, expected error: %v", err, c.expectError)
+			}
+
+			if bearerToken != c.expectedToken {
+				t.Errorf("GetBearerToken() received token string: %v, expected token string: %v", bearerToken, c.expectedToken)
 			}
 		})
 	}

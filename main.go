@@ -22,6 +22,7 @@ type apiConfig struct {
 	fileServerHits atomic.Int32
 	dbQueries *database.Queries
 	platform string
+	secret string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -138,6 +139,7 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Password string `json:"password"`
 		Email string 	`json:"email"`
+		ExpiresInSeconds int `json:"expires_in_seconds"`
 	} {}
 
 	decoder := json.NewDecoder(r.Body)
@@ -147,6 +149,7 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
+
 
 	user, err := cfg.dbQueries.GetUser(r.Context(), data.Email)
 	if err != nil {
@@ -158,12 +161,25 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, 401, "Incorrect email and password")
 	}
 
+
 	if ok {
+		if data.ExpiresInSeconds <= 0 || data.ExpiresInSeconds > 3600 {
+			data.ExpiresInSeconds = 3600
+		}
+
+		token, err := auth.MakeJWT(user.ID, cfg.secret, time.Duration(data.ExpiresInSeconds) * time.Second)
+		if err != nil {
+			w.WriteHeader(500)
+			fmt.Printf("Error: %v", err)
+			return
+		}
+
 		resp := User {
 			ID: user.ID,
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email: user.Email,
+			Token: token,
 		}
 		responsdWithJson(w, 200, resp)
 	} else {
@@ -174,8 +190,8 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request) {
 	chirp := struct {
 		Body string 		`json:"body"`
-		UserID uuid.UUID 	`json:"user_id"`
 	} {}
+
 
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&chirp)
@@ -185,8 +201,21 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	tokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "requires authorization token")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(tokenString, cfg.secret)
+	if err != nil {
+		respondWithError(w, 401, "invalid authorization token")
+		return
+	}
+
 	if len(chirp.Body) > 140 {
 		respondWithError(w, 400, "Chirp is too long")
+		return
 	}
 
 	profanity := []string{"kerfuffle", "sharbert", "fornax"}
@@ -199,7 +228,7 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 
 	params := database.CreateChirpParams {
 		Body: strings.Join(words, " "),
-		UserID: uuid.NullUUID { Valid: true, UUID: chirp.UserID },
+		UserID: uuid.NullUUID { Valid: true, UUID: userID },
 	}
 	dbChirp, err := cfg.dbQueries.CreateChirp(r.Context(), params)
 	if err != nil {
@@ -271,6 +300,7 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email string 		`json:"email"`
+	Token string 		`json:"token"`
 };
 
 type Chirp struct {
@@ -286,6 +316,7 @@ func main() {
 	godotenv.Load(".env")
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
+	secret := os.Getenv("SECRET")
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -296,7 +327,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	apiConfig := apiConfig{dbQueries: dbQueries, platform: platform}
+	apiConfig := apiConfig{dbQueries: dbQueries, platform: platform, secret: secret}
 
 	var fileSystem http.Dir = "."
 	fileServer := http.FileServer(fileSystem)
