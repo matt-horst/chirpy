@@ -130,6 +130,7 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		CreatedAt: dbUser.CreatedAt, 
 		UpdatedAt: dbUser.UpdatedAt, 
 		Email: dbUser.Email, 
+		IsChirpyRed: dbUser.IsChirpyRed,
 	}
 
 	respondWithJson(w, 201, user)
@@ -191,6 +192,7 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 			Email: user.Email,
 			Token: token,
 			RefreshToken: refreshToken,
+			IsChirpyRed: user.IsChirpyRed,
 		}
 		respondWithJson(w, 200, resp)
 	} else {
@@ -403,11 +405,13 @@ func (cfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) 
 		CreatedAt time.Time `json:"created_at"`
 		UpdatedAt time.Time `json:"updated_at"`
 		Email string 		`json:"email"`
+		IsChirpyRed bool	`json:"is_chirpy_red"`
 	} {
 		ID: user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email: user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 
 	respondWithJson(w, http.StatusOK, resp)
@@ -452,6 +456,35 @@ func (cfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (cfg *apiConfig) polkaWebhooksHandler(w http.ResponseWriter, r *http.Request) {
+	data := struct {
+		Event string 		`json:"event"`
+		Data struct {
+			UserID uuid.UUID 		`json:"user_id"`
+		}					`json:"data"`
+	} {}
+
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&data)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	if data.Event != "user.upgraded" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	_, err = cfg.dbQueries.UpgradeUserToChirpyRed(r.Context(), data.Data.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "couldn't find user")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type User struct {
 	ID uuid.UUID 		`json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -459,6 +492,7 @@ type User struct {
 	Email string 		`json:"email"`
 	Token string 		`json:"token"`
 	RefreshToken string `json:"refresh_token"`
+	IsChirpyRed bool	`json:"is_chirpy_red"`
 };
 
 type Chirp struct {
@@ -504,6 +538,7 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", apiConfig.revokeHandler)
 	mux.HandleFunc("PUT /api/users", apiConfig.updateUserHandler)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiConfig.deleteChirpHandler)
+	mux.HandleFunc("POST /api/polka/webhooks", apiConfig.polkaWebhooksHandler)
 
 	server := http.Server {Addr: ":8080", Handler: mux}
 
