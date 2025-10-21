@@ -263,11 +263,26 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.dbQueries.GetAllChirps(r.Context())
-	if err != nil {
-		w.WriteHeader(500)
-		fmt.Printf("Error: %v\n", err)
-		return
+	authorID := r.URL.Query().Get("author_id")
+
+	var chirps []database.Chirp
+	var err error
+
+	if authorID == "" {
+		chirps, err = cfg.dbQueries.GetAllChirps(r.Context())
+		if err != nil {
+			w.WriteHeader(500)
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
+	} else {
+		authorID, err := uuid.Parse(authorID)
+		chirps, err = cfg.dbQueries.GetAllChirpsByAuthor(r.Context(), uuid.NullUUID{ UUID: authorID, Valid: true })
+		if err != nil {
+			w.WriteHeader(500)
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
 	}
 
 	var resp []Chirp
@@ -461,6 +476,7 @@ func (cfg *apiConfig) polkaWebhooksHandler(w http.ResponseWriter, r *http.Reques
 	apiKey, err := auth.GetAPIKey(r.Header)
 	if err != nil || apiKey != cfg.polkaKey {
 		respondWithError(w, http.StatusUnauthorized, "invalid api key")
+		return
 	}
 
 	data := struct {
